@@ -1,0 +1,145 @@
+# ==============================================================================
+# Delete old workflow runs - 自动清理 GitHub Actions 运行记录
+# ==============================================================================
+#
+# 功能：
+#   定期或手动删除仓库中过期的 workflow 运行记录，保持 Actions 页面整洁。
+#
+# 触发方式：
+#   1. 手动触发：Actions 页面 → 选择此 workflow → "Run workflow"
+#   2. 定时触发：取消下方 schedule 注释即可开启（当前已关闭）
+#
+# 定时执行开关：
+#   【关闭】schedule 段保持注释状态（当前状态），只用手动触发
+#   【开启】取消下面两行注释，修改 cron 表达式：
+#     '0 0 1 * *' = 每月 1 号 00:00 UTC
+#     '0 0 * * 0' = 每周日 00:00 UTC
+#     '0 0 * * *' = 每天 00:00 UTC
+#     '0 */6 * * *' = 每 6 小时一次
+#
+# 完全禁用本 workflow：
+#   方法1: 删除此文件 (.github/workflows/delete-old-runs.yml)
+#   方法2: GitHub 仓库 → Actions → 选此 workflow → ... → Disable workflow
+#
+# 重要提醒：
+#   - GitHub API 限制：只有"已完成"或"超过两周旧"的运行才能被删除
+#   - 首次使用建议 dry_run 保持 true，确认要删的范围后再改 false
+#   - 跨仓库删除需要带 repo scope 的 PAT，存到 Secrets 中
+#
+# ==============================================================================
+
+name: Delete old workflow runs 清理
+
+on:
+  # 定时触发（当前已关闭，需要时取消注释）
+  # schedule:
+  #   - cron: '0 0 1 * *'
+
+  # 手动触发（保留）
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '保留天数：删除多少天以前的记录（默认 30）'
+        required: true
+        default: '30'
+      minimum_runs:
+        description: '最低保留条数：每个 workflow 至少留几条（默认 6）'
+        required: true
+        default: '6'
+      use_daily_retention:
+        description: '每日保留模式：true=每天至少留 N 条（适合高频触发）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      delete_workflow_pattern:
+        description: '按名称过滤：只处理匹配的 workflow（留空=全部，多个用 | 分隔）'
+        required: false
+        default: ''
+      delete_run_by_conclusion_pattern:
+        description: '按状态过滤：只删指定结论的运行'
+        required: false
+        default: 'ALL'
+        type: choice
+        options:
+          - 'ALL'
+          - 'Unsuccessful: action_required,cancelled,failure,skipped'
+          - action_required
+          - cancelled
+          - failure
+          - skipped
+          - success
+      dry_run:
+        description: '预览模式：true=只打印不删除；false=实际执行删除'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+# 权限说明：
+#   actions: write  → 删除 workflow runs 必需
+#   contents: read  → 读取仓库信息
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  del_runs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+
+        # ======================================================================
+        # 参数说明（所有参数均来自 Mattraks/delete-workflow-runs v2.1.0）
+        # ======================================================================
+        with:
+          # 认证 token（当前仓库用 github.token；跨仓库需 PAT 存到 Secrets）
+          token: ${{ github.token }}
+
+          # 目标仓库（当前仓库；跨仓库格式为 owner/repo）
+          repository: ${{ github.repository }}
+
+          # 保留天数：达到或超过此天数的运行才会被删（默认 30）
+          retain_days: ${{ github.event.inputs.days || 30 }}
+
+          # 最低保留条数：每个 workflow 至少保留的运行数（默认 6）
+          # 注意：当 use_daily_retention=true 时，含义变为"每天至少保留 N 条"
+          keep_minimum_runs: ${{ github.event.inputs.minimum_runs || 6 }}
+
+          # 每日保留模式（v2.1.0 新增）：
+          #   false = 总共至少留 N 条
+          #   true  = 每天至少留 N 条（适合每小时/每分钟触发的 workflow）
+          use_daily_retention: ${{ github.event.inputs.use_daily_retention || 'false' }}
+
+          # 按 workflow 名称/文件名过滤（支持正则，| 分隔多个）
+          # 例如：build|deploy|test
+          delete_workflow_pattern: ${{ github.event.inputs.delete_workflow_pattern }}
+
+          # 按 workflow 状态过滤（默认 ALL）：
+          #   active / deleted / disabled_fork / disabled_inactivity / disabled_manually
+          delete_workflow_by_state_pattern: 'ALL'
+
+          # 按运行结论过滤（默认 ALL）：
+          #   action_required / cancelled / failure / skipped / success
+          # 常用组合：只删失败的 → 'cancelled,failure,skipped'
+          delete_run_by_conclusion_pattern: >-
+            ${{ startsWith(github.event.inputs.delete_run_by_conclusion_pattern, 'Unsuccessful:')
+                && 'action_required,cancelled,failure,skipped'
+                || github.event.inputs.delete_run_by_conclusion_pattern }}
+
+          # 分支保护：true=跳过仍有关联分支的运行（默认分支除外）
+          check_branch_existence: false
+
+          # PR 保护：true=跳过仍有关联 PR 的运行
+          check_pullrequest_exist: false
+
+          # 预览模式：true=只打印将要删除的记录，不实际删除
+          dry_run: ${{ github.event.inputs.dry_run || 'true' }}
+
+          # GitHub Enterprise / GHES 私有部署时需要指定 API 地址
+          # baseUrl: 'https://github.mycompany.com/api/v3'
