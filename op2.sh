@@ -123,3 +123,6 @@ uci set system.@system[0].zonename='Asia/Shanghai'
 uci commit system
 EOF
 chmod +x files/etc/uci-defaults/99-timezone
+
+# 修复 gen_aml_emmc_img.sh 权限丢失导致 Error 126
+chmod +x target/linux/amlogic/image/gen_aml_emmc_img.sh
