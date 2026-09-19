@@ -9,67 +9,14 @@
 # File name: diy-op2.sh
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 #
-
 # 删除自带的 golang
 rm -rf feeds/packages/lang/golang
 # 拉取新的 golang
 git clone https://github.com/sbwml/packages_lang_golang.git -b 26.x feeds/packages/lang/golang
-
-# 删除 passwall 自带的核心库
-rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
-rm -rf package/feeds/packages/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
-# 拉取新的 passwall-packages
-git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git package/chajian/passwall-packages
-#cd package/chajian/passwall-packages
-#git checkout bc40fceb0488dfb5a4adb711cc1830a8021ee555
-#cd -
-
-# 删除 passwall 过时的 luci
-rm -rf feeds/luci/applications/luci-app-passwall
-rm -rf package/feeds/luci/luci-app-passwall
-# 拉取新的 passwall-luci
-git clone https://github.com/Openwrt-Passwall/openwrt-passwall.git package/chajian/passwall-luci
-#cd package/chajian/passwall-luci
-#git checkout ebd3355bdf2fcaa9e0c43ec0704a8d9d8cf9f658
-#cd -
-
-# 拉取 easytier、luci-app-easytier
-git clone https://github.com/EasyTier/luci-app-easytier.git package/chajian/easytier
-
-# 拉取锐捷认证
-git clone https://github.com/sbwml/luci-app-mentohust.git package/chajian/mentohust
-
-# 拉取 msd_lite、luci-app-msd_lite
-git clone https://github.com/gtolog/openwrt-msd_lite.git package/chajian/msd_lite
-
-# 拉取 OpenAppFilter、luci-app-oaf
-git clone https://github.com/destan19/OpenAppFilter.git package/chajian/OpenAppFilter
-
-## 删除自带的 luci-app-socat
-rm -rf feeds/lienol/luci-app-socat
-rm -rf package/feeds/lienol/luci-app-socat
-# 拉取新的 luci-app-socat
-git clone https://github.com/chenmozhijin/luci-app-socat.git package/chajian/socat
-
-# 替换 tailscale 的默认启动脚本和配置
-sed -i '/\/etc\/init\.d\/tailscale/d;/\/etc\/config\/tailscale/d;' feeds/packages/net/tailscale/Makefile
-# 拉取 luci-app-tailscale
-git clone https://github.com/asvow/luci-app-tailscale.git package/chajian/tailscale/luci-app-tailscale
-
-# 拉取 luci-theme-argon
-#git clone https://github.com/jerrykuku/luci-theme-argon.git -b master package/chajian/argon/luci-theme-argon
-# 拉取 luci-app-argon-config
-#git clone https://github.com/jerrykuku/luci-app-argon-config.git -b master package/chajian/argon/luci-app-argon-config
-# 拉取 luci-theme-argon、luci-app-argon-config
-git clone https://github.com/sbwml/luci-theme-argon.git -b openwrt-25.12-legacy package/chajian/argon
-
-# 特殊的替换配置
-## 删除自带的 ddns-scripts
-rm -rf feeds/packages/net/ddns-scripts
-## 删除自带的 luci-base
-rm -rf feeds/luci/modules/luci-base
-## 删除自带的 luci-app-firewall
-rm -rf feeds/luci/applications/luci-app-firewall
+# 拉取 luci-app-poweroffdevice（master 分支即 24.10 JS 版）
+git clone https://github.com/sirpdboy/luci-app-poweroffdevice.git package/chajian/poweroffdevice
+# 拉取 luci-app-mosdns（含 mosdns 主程序 + v2dat）
+git clone https://github.com/sbwml/luci-app-mosdns.git package/chajian/mosdns
 ## 筛选程序
 function merge_package(){
     # 参数1是分支名,参数2是库地址。所有文件下载到指定路径。
@@ -89,40 +36,17 @@ function merge_package(){
     done
     cd "$rootdir"
 }
-## 提取 ddns-scripts
-merge_package openwrt-25.12 https://github.com/immortalwrt/packages.git feeds/packages/net net/ddns-scripts
 ## 提取 fullconenat-nft
-merge_package openwrt-25.12 https://github.com/immortalwrt/immortalwrt.git package/network/utils package/network/utils/fullconenat-nft
-## 提取 pdnsd-alt、upx
-merge_package main https://github.com/kenzok8/jell.git package/chajian/kenzok8-package pdnsd-alt upx
-## 提取 luci-base（如上 fullconenat-nft 需要）
-merge_package openwrt-25.12 https://github.com/immortalwrt/luci.git feeds/luci/modules modules/luci-base
-## 提取 luci-app-firewall（如上 fullconenat-nft 需要）
-merge_package openwrt-25.12 https://github.com/immortalwrt/luci.git feeds/luci/applications applications/luci-app-firewall
-
-# 删除 feeds.conf.default 中添加的第三方源
-sed -i '/lienol/d' feeds.conf.default
-
+merge_package openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git package/network/utils package/network/utils/fullconenat-nft
 # 修改默认 IP
 sed -i 's/192.168.1.1/192.168.5.254/g' package/base-files/files/bin/config_generate
 #sed -i 's/192.168.1.1/192.168.8.1/g' package/base-files/files/bin/config_generate
-
 # 修改默认主题
 sed -i 's/luci-theme-bootstrap/luci-theme-material/g' feeds/luci/collections/luci-light/Makefile
-
 # 修改主机名
 sed -i "s/hostname='.*'/hostname='OneCloud'/g" package/base-files/files/bin/config_generate
-
 # 修改默认时区
-## 创建 uci-defaults 脚本
-mkdir -p files/etc/uci-defaults
-cat > files/etc/uci-defaults/99-timezone << 'EOF'
-#!/bin/sh
-uci set system.@system[0].timezone='CST-8'
-uci set system.@system[0].zonename='Asia/Shanghai'
-uci commit system
-EOF
-chmod +x files/etc/uci-defaults/99-timezone
-
+sed -i "s/timezone='.*'/timezone='CST-8'/g" package/base-files/files/bin/config_generate
+sed -i "/.*timezone='CST-8'.*/a\ set system.@system[-1].zonename='Asia/Shanghai'" package/base-files/files/bin/config_generate
 # 修复 gen_aml_emmc_img.sh 权限丢失导致 Error 126
 chmod +x target/linux/amlogic/image/gen_aml_emmc_img.sh
