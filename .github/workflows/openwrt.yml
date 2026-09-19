@@ -126,57 +126,71 @@ jobs:
 
     - name: Generate direct burn
       run: |
-          sudo apt install android-sdk-libsparse-utils
-          ver="v0.3.1"
-          curl -L -o ./AmlImg https://github.com/lxiaya/AmlImg/releases/download/$ver/AmlImg_${ver}_linux_amd64
-          chmod +x ./AmlImg
-          curl -L -o ./uboot.img https://github.com/lxiaya/u-boot-onecloud/releases/download/build-20230901-0443/eMMC.burn.img
-          ./AmlImg unpack ./uboot.img burn/
-          echo "::endgroup::"
+        sudo apt install -y android-sdk-libsparse-utils
+        ver="v0.3.1"
+        curl -L -o ./AmlImg https://github.com/lxiaya/AmlImg/releases/download/$ver/AmlImg_${ver}_linux_amd64
+        chmod +x ./AmlImg
+        curl -L -o ./uboot.img https://github.com/lxiaya/u-boot-onecloud/releases/download/build-20230901-0443/eMMC.burn.img
+        ./AmlImg unpack ./uboot.img burn/
+
+        # 安全解压 .gz（无匹配时不会报错）
+        shopt -s nullglob
+        gz_files=(openwrt/bin/targets/*/*/*.gz)
+        if [ ${#gz_files[@]} -gt 0 ]; then
           gunzip openwrt/bin/targets/*/*/*.gz
-          diskimg=$(ls openwrt/bin/targets/*/*/*.img)
-          loop=$(sudo losetup --find --show --partscan $diskimg)
-          img_ext="openwrt.img"
-          img_mnt="xd"
-          rootfs_mnt="img"
-          boot_img=$1${img_ext}
-          boot_img_mnt=$1${img_mnt}
-          rootfs_img_mnt=$1${rootfs_mnt}
-          echo ${boot_img}
-          echo ${boot_img_mnt}
-          echo ${rootfs_img_mnt}
-          sudo rm -rf ${boot_img}
-          sudo rm -rf ${boot_img_mnt}
-          sudo rm -rf ${rootfs_img_mnt}
-          sudo dd if=/dev/zero of=${boot_img} bs=1M count=400
-          sudo mkfs.ext4 ${boot_img}
-          sudo mkdir ${boot_img_mnt}
-          sudo mkdir ${rootfs_img_mnt}
-          sudo mount ${boot_img} ${boot_img_mnt}
-          sudo mount ${loop}p2 ${rootfs_img_mnt}
-          cd ${rootfs_img_mnt}
-          sudo cp -r * ../${boot_img_mnt}
-          cd ..
-          sudo sync
-          sudo umount ${boot_img_mnt}
-          sudo umount ${rootfs_img_mnt}
-          sudo img2simg ${loop}p1 burn/boot.simg
-          sudo img2simg openwrt.img burn/rootfs.simg
-          sudo rm -rf *.img
-          sudo losetup -d $loop
-          cat <<EOF >>burn/commands.txt
-          PARTITION:boot:sparse:boot.simg
-          PARTITION:rootfs:sparse:rootfs.simg
-          EOF
-          prefix=$(ls openwrt/bin/targets/*/*/*.img | sed 's/\.img$//')
-          burnimg=${prefix}.burn.img
-          ./AmlImg pack $burnimg burn/
-          for f in openwrt/bin/targets/*/*/*.burn.img; do
-            sha256sum "$f" >"${f}.sha"
-            xz -9 --threads=0 --compress "$f"
-          done
-          sudo rm -rf openwrt/bin/targets/*/*/*.img
-          sudo rm -rf openwrt/bin/targets/*/*/*.gz
+        fi
+
+        # 找到 .img 文件
+        img_files=(openwrt/bin/targets/*/*/*.img)
+        if [ ${#img_files[@]} -eq 0 ]; then
+          echo "错误：未找到 .img 文件"
+          exit 1
+        fi
+        diskimg="${img_files[0]}"
+
+        loop=$(sudo losetup --find --show --partscan "$diskimg")
+        boot_img="openwrt.img"
+        boot_img_mnt="xd"
+        rootfs_img_mnt="img"
+
+        sudo rm -rf "$boot_img" "$boot_img_mnt" "$rootfs_img_mnt"
+        sudo dd if=/dev/zero of="$boot_img" bs=1M count=600
+        sudo mkfs.ext4 "$boot_img"
+        sudo mkdir -p "$boot_img_mnt" "$rootfs_img_mnt"
+        sudo mount "$boot_img" "$boot_img_mnt"
+        sudo mount "${loop}p2" "$rootfs_img_mnt"
+
+        cd "$rootfs_img_mnt"
+        sudo cp -r * ../"$boot_img_mnt"
+        cd ..
+        sudo sync
+        sudo umount "$boot_img_mnt"
+        sudo umount "$rootfs_img_mnt"
+        sudo img2simg "${loop}p1" burn/boot.simg
+        sudo img2simg openwrt.img burn/rootfs.simg
+        sudo rm -rf openwrt.img
+        sudo losetup -d "$loop"
+
+        cat <<EOF >> burn/commands.txt
+        PARTITION:boot:sparse:boot.simg
+        PARTITION:rootfs:sparse:rootfs.simg
+        EOF
+
+        # 打包 burn.img
+        prefix=$(basename "$diskimg" .img)
+        target_dir=$(dirname "$diskimg")
+        burnimg="${target_dir}/${prefix}.burn.img"
+        ./AmlImg pack "$burnimg" burn/
+
+        # 压缩并生成校验文件
+        for f in openwrt/bin/targets/*/*/*.burn.img; do
+          [ -f "$f" ] && sha256sum "$f" > "${f}.sha"
+          [ -f "$f" ] && xz -9 --threads=0 --compress "$f"
+        done
+
+        # 清理中间文件
+        sudo rm -f openwrt/bin/targets/*/*/*.img
+        sudo rm -f openwrt/bin/targets/*/*/*.gz
 
     - name: Check space usage
       if: (!cancelled())
@@ -186,32 +200,39 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
-        name: OpenWrt-l2512_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt-l2410_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: openwrt/bin
 
     - name: Organize files
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        shopt -s nullglob
+        target_dirs=(openwrt/bin/targets/*/*)
+        if [ ${#target_dirs[@]} -eq 0 ]; then
+          echo "错误：未找到 targets 输出目录"
+          exit 1
+        fi
+        echo "FIRMWARE=${target_dirs[0]}" >> $GITHUB_ENV
+        rm -rf "${target_dirs[0]}/packages"
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt-l2512_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt-l2410_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
     - name: Generate release tag
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
+        echo "release_tag=OneCloud-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        echo "📦 OpenWrt OneCloud Firmware" > release.txt
+        echo "" >> release.txt
+        echo "**编译时间**: $(date +"%Y-%m-%d %H:%M")" >> release.txt
+        echo "**源码分支**: ${{ env.REPO_BRANCH }}" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
@@ -222,19 +243,21 @@ jobs:
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
-        files: ${{ env.FIRMWARE }}/*
+        files: |
+          ${{ env.FIRMWARE }}/*.xz
+          ${{ env.FIRMWARE }}/*.sha
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@main
       with:
         retain_days: 0
-        keep_minimum_runs: 2
+        keep_minimum_runs: 5
 
     - name: Remove old Releases
       uses: dev-drprasad/delete-older-releases@master
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
-        keep_latest: 3
+        keep_latest: 5
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
